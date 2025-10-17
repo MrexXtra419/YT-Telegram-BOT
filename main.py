@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # ==========================
-# YouTube Download Function
+# YouTube Downloader
 # ==========================
 async def download_video(url: str, output_dir: str = "downloads") -> str:
     os.makedirs(output_dir, exist_ok=True)
@@ -17,7 +17,6 @@ async def download_video(url: str, output_dir: str = "downloads") -> str:
         "merge_output_format": "mp4",
         "quiet": True,
         "noplaylist": True,
-        "progress_hooks": [lambda d: print(f"Progress: {d.get('status')}")],
     }
 
     try:
@@ -47,7 +46,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Download failed. Please check the link.")
 
 # ==========================
-# Bot Entry Point
+# Bot Runner
 # ==========================
 async def main():
     token = os.getenv("BOT_TOKEN")
@@ -56,15 +55,24 @@ async def main():
         return
 
     app = Application.builder().token(token).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     print("🚀 Bot running on Railway...")
-    await app.run_polling()  # ✅ replaces updater.idle()
+    await app.run_polling()
 
 # ==========================
-# Run bot
+# Async-Safe Runner (Fix)
 # ==========================
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        print("⚙️ Using existing event loop...")
+        task = loop.create_task(main())
+        loop.run_until_complete(task)
+    else:
+        asyncio.run(main())
