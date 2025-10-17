@@ -1,5 +1,4 @@
 import os
-import asyncio
 import logging
 import subprocess
 from telegram import Update
@@ -7,14 +6,14 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    filters,
     ContextTypes,
+    filters,
 )
 
 # =============== CONFIG ===============
-TOKEN = os.getenv("BOT_TOKEN")  # Use Railway environment variable
+TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
-    raise ValueError("❌ BOT_TOKEN not found! Please set it in Railway Variables.")
+    raise ValueError("❌ BOT_TOKEN not found! Set it in Railway Variables.")
 
 # =============== LOGGING ===============
 logging.basicConfig(
@@ -45,33 +44,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(update.message.text)
 
-# =============== MAIN FUNCTION ===============
-async def main():
+# =============== MAIN BOT SETUP ===============
+def main():
     print("🚀 Starting Telegram Bot...")
-
-    # Install ffmpeg automatically
     install_ffmpeg()
 
-    # Build the bot
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # Register handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     print("🚀 Bot running on Railway...")
-    await app.run_polling()
+    # Direct synchronous call — no asyncio.run()
+    app.run_polling(close_loop=False)
 
-# =============== SAFE ASYNC STARTUP ===============
+# =============== ENTRYPOINT ===============
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except RuntimeError as e:
-        if "event loop is already running" in str(e):
-            print("⚠️ Detected running event loop, reusing it...")
-            loop = asyncio.get_event_loop()
-            loop.create_task(main())
-            loop.run_forever()
-        else:
-            raise
+    main()
