@@ -1,98 +1,77 @@
 import os
 import asyncio
-import yt_dlp
+import logging
+import subprocess
 from telegram import Update
 from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    filters, ContextTypes
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
 )
 
-# ==========================
-# CONFIG
-# ==========================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-DOWNLOAD_DIR = "downloads"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+# =============== CONFIG ===============
+TOKEN = os.getenv("BOT_TOKEN")  # Use Railway environment variable
+if not TOKEN:
+    raise ValueError("❌ BOT_TOKEN not found! Please set it in Railway Variables.")
 
-# ==========================
-# DOWNLOAD LOGIC
-# ==========================
-async def download_video(url: str) -> str | None:
-    """Download YouTube video using yt_dlp and return filename."""
-    output_path = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
+# =============== LOGGING ===============
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
-    ydl_opts = {
-        "outtmpl": output_path,
-        "format": "bestvideo+bestaudio/best",
-        "merge_output_format": "mp4",
-        "quiet": True,
-        "noplaylist": True,
-    }
-
+# =============== FFMPEG AUTO-INSTALL ===============
+def install_ffmpeg():
     try:
-        def run_download():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                return ydl.prepare_filename(info)
+        result = subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode == 0:
+            print("✅ ffmpeg already installed")
+            return
+    except FileNotFoundError:
+        print("⚙️ Installing ffmpeg...")
+        os.system("apt-get update && apt-get install -y ffmpeg")
+        print("✅ ffmpeg installed successfully")
 
-        loop = asyncio.get_running_loop()
-        filename = await loop.run_in_executor(None, run_download)
-        return filename
-
-    except Exception as e:
-        print(f"[ERR] Download failed: {e}")
-        return None
-
-# ==========================
-# BOT COMMANDS
-# ==========================
+# =============== BOT COMMANDS ===============
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎬 Send me a YouTube link to download!")
+    await update.message.reply_text("👋 Hey there! I'm alive and running on Railway!")
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text.strip()
-    if not ("youtube.com" in url or "youtu.be" in url):
-        await update.message.reply_text("⚠️ Please send a valid YouTube link.")
-        return
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📜 Commands:\n/start - Check bot status\n/help - Show this message")
 
-    await update.message.reply_text("⬇️ Downloading video, please wait...")
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(update.message.text)
 
-    filename = await download_video(url)
-    if filename and os.path.exists(filename):
-        await update.message.reply_video(video=open(filename, "rb"))
-        os.remove(filename)
-        await update.message.reply_text("✅ Done!")
-    else:
-        await update.message.reply_text("❌ Download failed.")
-
-# ==========================
-# MAIN APP
-# ==========================
+# =============== MAIN FUNCTION ===============
 async def main():
-    if not BOT_TOKEN:
-        print("[ERR] BOT_TOKEN not set in environment!")
-        return
+    print("🚀 Starting Telegram Bot...")
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    # Install ffmpeg automatically
+    install_ffmpeg()
 
+    # Build the bot
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    # Register handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     print("🚀 Bot running on Railway...")
-    await app.run_polling()  # async-safe
+    await app.run_polling()
 
-# ==========================
-# ASYNCIO LOOP FIX
-# ==========================
+# =============== SAFE ASYNC STARTUP ===============
 if __name__ == "__main__":
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        # Railway or environments with existing loop
-        print("⚙️ Using existing event loop...")
-        loop.create_task(main())
-    else:
         asyncio.run(main())
+    except RuntimeError as e:
+        if "event loop is already running" in str(e):
+            print("⚠️ Detected running event loop, reusing it...")
+            loop = asyncio.get_event_loop()
+            loop.create_task(main())
+            loop.run_forever()
+        else:
+            raise
