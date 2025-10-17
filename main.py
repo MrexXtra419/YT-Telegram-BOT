@@ -13,7 +13,7 @@ from telegram.request import HTTPXRequest
 BOT_TOKEN = os.getenv("BOT_TOKEN") or "PASTE_YOUR_TOKEN_HERE"
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-MAX_FILE_SIZE = 1900 * 1024 * 1024  # 1.9 GB chunk limit for Telegram
+MAX_FILE_SIZE = 1900 * 1024 * 1024  # 1.9 GB
 # =================================================
 
 def sanitize_filename(name: str) -> str:
@@ -70,29 +70,28 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "preferredquality": "192",
         }]
 
-    # -------- progress hook --------
+    loop = asyncio.get_running_loop()
+
     def progress_hook(d):
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 1
             percent = int(d.get("downloaded_bytes", 0) / total * 100)
             if percent % 10 == 0:
                 asyncio.run_coroutine_threadsafe(
-                    progress_msg.edit_text(f"⏳ Downloading... {percent}%"),
-                    asyncio.get_running_loop()
+                    progress_msg.edit_text(f"⏳ Downloading... {percent}%"), loop
                 )
         elif d["status"] == "finished":
             asyncio.run_coroutine_threadsafe(
-                progress_msg.edit_text("✅ Download complete! Processing..."),
-                asyncio.get_running_loop()
+                progress_msg.edit_text("✅ Download complete! Processing..."), loop
             )
 
     ydl_opts["progress_hooks"] = [progress_hook]
 
     try:
-        loop = asyncio.get_event_loop()
         def run_download():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 return ydl.extract_info(url, download=True)
+
         info = await loop.run_in_executor(None, run_download)
 
         safe_title = sanitize_filename(info.get("title", "video"))
@@ -115,7 +114,6 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         file_size = os.path.getsize(found_file)
         file_size_mb = file_size / (1024 * 1024)
-
         await progress_msg.edit_text(f"📤 Preparing upload ({file_size_mb:.1f} MB)...")
 
         if file_size > MAX_FILE_SIZE:
@@ -133,7 +131,6 @@ async def download_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== SPLIT + UPLOAD HELPERS ====================
 
 async def split_and_upload(filepath, query, type_):
-    """Split and send large files in 1.9GB chunks."""
     part_size = MAX_FILE_SIZE
     total_size = os.path.getsize(filepath)
     total_parts = math.ceil(total_size / part_size)
@@ -153,33 +150,41 @@ async def split_and_upload(filepath, query, type_):
             os.remove(part_name)
 
 async def upload_file(filepath, query, type_):
-    """Send small files directly."""
     with open(filepath, "rb") as f:
         if type_ == "video":
             await query.message.reply_video(video=f)
         else:
             await query.message.reply_audio(audio=f)
 
-# ==================== MAIN ====================
+# ==================== MAIN (ASYNC VERSION) ====================
 
-def main():
-    print("🚀 Bot running for everyone...")
+async def main():
+    print("🚀 Bot running on Railway...")
 
-    # Extended timeouts (important for Replit)
     request = HTTPXRequest(
         connection_pool_size=8,
-        read_timeout=900.0,  # 15 minutes
+        read_timeout=900.0,
         write_timeout=900.0,
         connect_timeout=60.0,
         pool_timeout=60.0
     )
 
-    app = Application.builder().token(BOT_TOKEN).request(request).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .request(request)
+        .build()
+    )
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(download_video))
 
-    app.run_polling()
+    await app.initialize()
+    await app.start()
+    print("✅ Bot started successfully!")
+    await app.updater.start_polling()
+    await app.updater.idle()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
