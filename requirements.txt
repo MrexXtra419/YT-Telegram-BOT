@@ -1,4 +1,4 @@
-python-telegram-bot==20.8
+python-telegram-bot==22.5
 yt-dlp
 ffmpeg-python
 aiofiles
